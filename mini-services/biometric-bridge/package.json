@@ -1,0 +1,8 @@
+{
+  "name": "biometric-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun run index.ts"
+  }
+}

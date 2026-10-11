@@ -1,0 +1,11 @@
+# EduTrack — production Python dependencies (installed by .zscripts/python-runtime-build.sh)
+# Keep in sync with biometric-service/requirements.txt.
+# NOTE: no InsightFace / no buffalo weights — permissively licensed stack only.
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+opencv-python-headless==5.0.0.93
+numpy==2.5.3
+onnxruntime==1.30.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+httpx==0.28.1

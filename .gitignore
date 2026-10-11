@@ -25,3 +25,27 @@ db/*.db
 .zscripts/dev.pid
 tool-results/
 upload/
+
+# All Python virtual environments
+**/.venv*/
+**/venv*/
+
+# Python-generated files
+**/__pycache__/
+*.py[cod]
+
+# Node.js dependencies and build output
+node_modules/
+.next/
+dist/
+build/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary development files
+tool-results/
+upload/
+*.tsbuildinfo

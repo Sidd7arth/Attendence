@@ -1,0 +1,182 @@
+// EduTrack — Student Attendance System
+// Prisma schema for SQLite
+//
+// Core entities (per spec):
+//   Student    → studentId, name, rollNumber, class
+//   Attendance → attendanceId, studentId, date, status (Present/Absent), markedBy
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Users ───────────────────────────
+
+model Admin {
+  id            String         @id @default(cuid())
+  name          String
+  email         String         @unique
+  passwordHash  String         @map("password_hash")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  announcements Announcement[]
+
+  @@map("admins")
+}
+
+model Student {
+  id           String             @id @default(cuid()) @map("student_id") // → studentId
+  name         String
+  rollNumber   String             @unique @map("roll_number") // → rollNumber
+  email        String             @unique
+  passwordHash String             @map("password_hash")
+  studentClass String             @map("class") // → class
+  phone        String?
+  active       Boolean            @default(true)
+  // Lightweight status flag only — the biometric template itself lives in
+  // FaceProfile (logical separation of biometric data from profile data).
+  faceRegistered Boolean          @default(false) @map("face_registered")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  attendances  Attendance[]
+  reads        AnnouncementRead[]
+  faceProfile  FaceProfile?
+  faceChallenges FaceChallenge[]
+
+  @@map("students")
+}
+
+// ───────────────────────── FaceProfile (biometrics) ─────────────────────────
+// One biometric template per student, kept separate from ordinary profile
+// data. Stores ONLY the numeric embedding — never images or raw frames.
+// The embedding is computed exclusively by the Python biometric service
+// (server-side CV: detection → quality → alignment → liveness → embedding);
+// the browser never produces or transmits embeddings.
+// `modelName`/`modelVersion`/`embeddingVersion`/`embeddingDimension` make every
+// template traceable to the exact model that produced it; embeddings from
+// incompatible versions/dimensions are never compared.
+
+model FaceProfile {
+  id                 String    @id @default(cuid())
+  studentId          String    @unique @map("student_id")
+  embedding          String // JSON array of floats, L2-normalized (dimension fixed by model)
+  embeddingDimension Int       @map("embedding_dimension") // e.g. 512 (ArcFace-class) — guards against cross-model comparison
+  samples            Int // number of live frames the template was aggregated from
+  modelName          String    @map("model_name") // e.g. "insightface/buffalo_l"
+  modelVersion       String    @map("model_version") // model weights lineage
+  embeddingVersion   Int       @default(1) @map("embedding_version") // template schema — bump on incompatible change
+  qualityScore       Float?    @map("quality_score") // mean server-computed quality across enrollment frames
+  livenessMethod     String?   @map("liveness_method") // server-side anti-spoof method used at enrollment
+  status             String    @default("ACTIVE") // ACTIVE | REVOKED
+  enrolledAt         DateTime  @default(now()) @map("enrolled_at")
+  lastVerifiedAt     DateTime? @map("last_verified_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  student            Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@map("face_profiles")
+}
+
+// ──────────────────────── FaceChallenge (anti-replay) ────────────────────────
+// Server-issued, single-use, expiring challenges for the student self-service
+// flow. DB-backed (not in-memory) so a challenge issued by any process can be
+// consumed atomically by any other. Binding a verification to a fresh
+// challenge prevents replayed capture payloads.
+
+model FaceChallenge {
+  id        String    @id // opaque random token
+  kind      String // gesture class bound to this challenge
+  studentId String    @map("student_id")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@map("face_challenges")
+}
+
+// ───────────────────────── Attendance ─────────────────────────
+// `date` is a local calendar key "YYYY-MM-DD" (client timezone) to
+// avoid UTC timezone drift; `checkInAt` is the attendance time instant.
+// One record per student per day (@@unique) prevents duplicate attendance.
+// GPS columns are captured by the device and validated server-side
+// (fail-closed when BIOMETRIC_GPS_REQUIRED=true); face/liveness verification
+// flags and verificationId are stamped ONLY by the server-side pipeline.
+// status: PRESENT | ABSENT | LATE | EXCUSED   (Present / Absent core, + extras)
+// markedBy: ADMIN | STUDENT
+// method: MANUAL (admin roster/bulk) | FACE (biometric check-in) | SELF (student self mark)
+
+model Attendance {
+  id                String   @id @default(cuid()) @map("attendance_id") // → attendanceId
+  studentId         String   @map("student_id")
+  date              String
+  status            String
+  markedBy          String   @map("marked_by")
+  method            String   @default("MANUAL")
+  note              String?
+  checkInAt         DateTime? @map("check_in_at")
+  latitude          Float?
+  longitude         Float?
+  gpsAccuracy       Float?   @map("gps_accuracy")
+  faceVerified      Boolean  @default(false) @map("face_verified")
+  livenessVerified  Boolean  @default(false) @map("liveness_verified")
+  verificationId    String?  @map("verification_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, date])
+  @@index([date])
+  @@index([createdAt])
+  @@map("attendances")
+}
+
+// ──────────────────────── Announcements ────────────────────────
+// targetClass = null → broadcast to all students
+
+model Announcement {
+  id          String             @id @default(cuid())
+  title       String
+  content     String
+  targetClass String?            @map("target_class")
+  priority    String             @default("NORMAL") // NORMAL | HIGH
+  adminId     String             @map("admin_id")
+  admin       Admin              @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  reads       AnnouncementRead[]
+
+  @@map("announcements")
+}
+
+model AnnouncementRead {
+  id             String       @id @default(cuid())
+  announcementId String       @map("announcement_id")
+  studentId      String       @map("student_id")
+  readAt         DateTime     @default(now()) @map("read_at")
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, studentId])
+  @@map("announcement_reads")
+}
+
+// ────────────────────────── Sessions ──────────────────────────
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  role      String // ADMIN | STUDENT
+  adminId   String?  @map("admin_id")
+  studentId String?  @map("student_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([token])
+  @@map("sessions")
+}

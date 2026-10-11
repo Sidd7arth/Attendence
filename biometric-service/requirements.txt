@@ -1,0 +1,13 @@
+# EduTrack Biometric Service — pinned dependencies
+# NOTE: no InsightFace / no buffalo weights — those pretrained packs are
+# non-commercial-research-only. This stack is 100% permissively licensed:
+#   OpenCV (Apache-2.0) · YuNet + SFace (OpenCV Zoo, Apache-2.0/MIT)
+#   MiniFASNet anti-spoof (Silent-Face-Anti-Spoofing, Apache-2.0)
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+opencv-python-headless==5.0.0.93
+numpy==2.5.3
+onnxruntime==1.30.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+httpx==0.28.1
